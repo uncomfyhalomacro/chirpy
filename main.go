@@ -33,13 +33,19 @@ func readiness(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (cfg *apiConfig) numberOfHits(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(200)
-	n, err := w.Write([]byte(fmt.Sprintf("Hits: %d", cfg.fileserverHits.Load())))
+	n, err := w.Write([]byte(fmt.Sprintf(`<html>
+<body>
+	<h1>Welcome, Chirpy Admin</h1>
+	<p>Chirpy has been visited %d times!</p>
+</body>
+</html>`, cfg.fileserverHits.Load())))
 	if err != nil {
 		log.Fatalln("Unable to write to response writer!")
 	}
 	log.Printf("Have written a total of %d bytes\n", n)
+	log.Printf("Total hits: %d\n", cfg.fileserverHits.Load())
 }
 
 func (cfg *apiConfig) reset(w http.ResponseWriter, _ *http.Request) {
@@ -63,8 +69,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(curdir)))))
 	mux.Handle("GET /api/healthz", apiCfg.middlewareMetricsInc(http.HandlerFunc(readiness)))
-	mux.Handle("GET /api/metrics", http.HandlerFunc(apiCfg.numberOfHits))
-	mux.Handle("POST /api/reset", http.HandlerFunc(apiCfg.reset))
+	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiCfg.numberOfHits))
+	mux.Handle("POST /admin/reset", http.HandlerFunc(apiCfg.reset))
 	server := http.Server{}
 	server.Addr = ":8080"
 	server.Handler = mux
