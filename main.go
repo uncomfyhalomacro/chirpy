@@ -16,6 +16,7 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg.fileserverHits.Add(1)
 		next.ServeHTTP(w, r)
+		log.Println("Hit!")
 		// your logic (e.g., increment the counter)
 		// then hand off to next handler
 	})
@@ -61,9 +62,9 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(curdir)))))
-	mux.Handle("GET /healthz", apiCfg.middlewareMetricsInc(http.HandlerFunc(readiness)))
-	mux.Handle("GET /metrics", http.HandlerFunc(apiCfg.numberOfHits))
-	mux.Handle("POST /reset", http.HandlerFunc(apiCfg.reset))
+	mux.Handle("GET /api/healthz", apiCfg.middlewareMetricsInc(http.HandlerFunc(readiness)))
+	mux.Handle("GET /api/metrics", http.HandlerFunc(apiCfg.numberOfHits))
+	mux.Handle("POST /api/reset", http.HandlerFunc(apiCfg.reset))
 	server := http.Server{}
 	server.Addr = ":8080"
 	server.Handler = mux
