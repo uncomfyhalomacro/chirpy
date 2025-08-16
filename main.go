@@ -53,7 +53,9 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		w.Write(dat)
 		return
 	}
-	log.Printf("%v\n", postData.Body)
+	log.Printf("Before cleaned: %v\n", postData.Body)
+	cleanedBody := cleanProfaneBody(postData.Body)
+	log.Printf("After cleaned: %v\n", cleanedBody)
 	if len(postData.Body) > 140 {
 		respBody := returnErrVal{
 			Err: "Chirp is too long",
@@ -71,7 +73,7 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 	}
 	respBody := returnValid{
 		Valid: true,
-		CleanedBody: cleanProfaneBody(postData.Body),
+		CleanedBody: cleanedBody,
 	}
 	dat, errMarshal := json.Marshal(respBody)
 	if errMarshal != nil {
@@ -85,7 +87,7 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func cleanProfaneBody(s string) string {
-	fields := strings.Fields(s)
+	fields := strings.Split(s, " ")
 	badwords := map[string]bool {
 		"kerfuffle": true,
 		"sharbert": true,
