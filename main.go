@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"sync/atomic"
+	"strings"
 )
 
 type apiConfig struct {
@@ -20,6 +22,81 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 		// your logic (e.g., increment the counter)
 		// then hand off to next handler
 	})
+}
+
+func validateChirp(w http.ResponseWriter, r *http.Request) {
+	type postDataShape struct {
+		Body string `json:"body"`
+	}
+	type returnErrVal struct {
+		Err string `json:"error"`
+	}
+	type returnValid struct {
+		Valid bool `json:"valid"`
+		CleanedBody string `json:"cleaned_body"`
+	}
+	var postData postDataShape
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&postData)
+	if err != nil {
+		respBody := returnErrVal{
+			Err: fmt.Sprintf("%v", err),
+		}
+		dat, errMarshal := json.Marshal(respBody)
+		if errMarshal != nil {
+			log.Printf("Error marshalling JSON: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(500)
+		w.Write(dat)
+		return
+	}
+	log.Printf("%v\n", postData.Body)
+	if len(postData.Body) > 140 {
+		respBody := returnErrVal{
+			Err: "Chirp is too long",
+		}
+		dat, errMarshal := json.Marshal(respBody)
+		if errMarshal != nil {
+			log.Printf("Error marshalling JSON: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write(dat)
+		return
+	}
+	respBody := returnValid{
+		Valid: true,
+		CleanedBody: cleanProfaneBody(postData.Body),
+	}
+	dat, errMarshal := json.Marshal(respBody)
+	if errMarshal != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(dat)
+}
+
+func cleanProfaneBody(s string) string {
+	fields := strings.Fields(s)
+	badwords := map[string]bool {
+		"kerfuffle": true,
+		"sharbert": true,
+		"fornax": true,
+	}
+	for idx, element := range fields {
+		if badwords[strings.ToLower(element)] {
+			fields[idx] = "****"
+		}
+	}
+	return strings.Join(fields, " ")
 }
 
 func readiness(w http.ResponseWriter, _ *http.Request) {
@@ -68,6 +145,7 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(curdir)))))
+	mux.Handle("POST /api/validate_chirp", apiCfg.middlewareMetricsInc(http.HandlerFunc(validateChirp)))
 	mux.Handle("GET /api/healthz", apiCfg.middlewareMetricsInc(http.HandlerFunc(readiness)))
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiCfg.numberOfHits))
 	mux.Handle("POST /admin/reset", http.HandlerFunc(apiCfg.reset))
