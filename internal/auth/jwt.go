@@ -2,10 +2,12 @@ package auth
 
 import (
 	"fmt"
+	"strings"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"time"
 	"errors"
+	"net/http"
 )
 
 func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
@@ -57,4 +59,16 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		return id, fmt.Errorf("unknown error: %v", err)
 	}
 
+}
+
+func GetBearerToken(headers http.Header) (string, error) {
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return "", fmt.Errorf("no authorization header found")
+	}
+	fields := strings.Fields(authHeader)
+	if len(fields) > 2 || len(fields) <= 1 {
+		return "", fmt.Errorf("this is not a valid authorization header")
+	}
+	return fields[1], nil
 }

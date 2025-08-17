@@ -4,6 +4,7 @@ import (
 	"testing"
 	"github.com/google/uuid"
 	"time"
+	"net/http"
 )
 
 func TestJWT(t *testing.T) {
@@ -21,6 +22,13 @@ func TestJWT(t *testing.T) {
 		if err != nil {
 			t.Errorf("%v\n", err)
 		}
+		newBearerToken := "Bearer " + tokenString
+		header := http.Header{}
+		header.Set("Authorization", newBearerToken)
+		tokenString, err = GetBearerToken(header)
+		if err != nil {
+			t.Errorf("%v\n", err)
+		}
 		id, err := ValidateJWT(tokenString, testSigningKey)
 		if err != nil {
 			t.Errorf("%v\n", err)
@@ -31,5 +39,4 @@ func TestJWT(t *testing.T) {
 			t.Errorf("id does not match: %v vs %v\n", id, testUUID)
 		}
 	}
-
 }
