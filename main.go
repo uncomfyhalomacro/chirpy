@@ -21,6 +21,30 @@ type apiConfig struct {
 	db             *database.Queries
 }
 
+type postDataShape struct {
+	UserID uuid.UUID `json:"user_id"`
+	Body   string    `json:"body"`
+}
+type returnErrChirp struct {
+	Err string `json:"error"`
+}
+type returnValidChirp struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+	UserID    uuid.UUID `json:"user_id"`
+}
+type UserDetail struct {
+	Email string `json:"email"`
+}
+type returnUser struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
+}
+
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg.fileserverHits.Add(1)
@@ -32,25 +56,89 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 func (cfg *apiConfig) chirps(w http.ResponseWriter, r *http.Request) {
-	type postDataShape struct {
-		UserID uuid.UUID `json:"user_id"`
-		Body   string    `json:"body"`
+	if r.Method == "POST" {
+		cfg.postChirps(w, r)
+		return
 	}
-	type returnErrVal struct {
-		Err string `json:"error"`
+	if r.Method == "GET" {
+		cfg.getChirps(w, r)
+		return
 	}
-	type returnValidChirp struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Body      string    `json:"body"`
-		UserID    uuid.UUID `json:"user_id"`
+}
+
+func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
+	pathValue := r.PathValue("chirpID")
+	if pathValue != "" {
+		id, err := uuid.Parse(pathValue)
+		if err != nil {
+			msg := fmt.Sprintf("500 - %s", err)
+			log.Printf("%s\n", msg)
+			http.Error(w, msg, 500)
+			return
+		}
+		chirp, err := cfg.db.GetChirp(r.Context(), id)
+		if err != nil {
+			msg := fmt.Sprintf("404 - %s", err)
+			log.Printf("%s\n", msg)
+			http.Error(w, msg, 404)
+			return
+		}
+		respBody := returnValidChirp{
+			ID:        chirp.ID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+			Body:      chirp.Body,
+			UserID:    chirp.UserID,
+		}
+		dat, errMarshal := json.Marshal(respBody)
+		if errMarshal != nil {
+			msg := fmt.Sprintf("500 - %s", errMarshal)
+			log.Printf("%s\n", msg)
+			http.Error(w, msg, 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write(dat)
+		return
+
 	}
+	chirps, err := cfg.db.GetChirps(r.Context())
+	if err != nil {
+		msg := fmt.Sprintf("500 - %s", err)
+		log.Printf("%s\n", msg)
+		http.Error(w, msg, 500)
+		return
+	}
+	var chirpJSON []returnValidChirp
+	for _, chirp := range chirps {
+		chirpJSON = append(chirpJSON, returnValidChirp{
+			ID:        chirp.ID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+			Body:      chirp.Body,
+			UserID:    chirp.UserID,
+		})
+	}
+
+	dat, errMarshal := json.Marshal(chirpJSON)
+	if errMarshal != nil {
+		msg := fmt.Sprintf("500 - %s", errMarshal)
+		log.Printf("%s\n", msg)
+		http.Error(w, msg, 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(dat)
+}
+
+func (cfg *apiConfig) postChirps(w http.ResponseWriter, r *http.Request) {
 	var postData postDataShape
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&postData)
 	if err != nil {
-		respBody := returnErrVal{
+		respBody := returnErrChirp{
 			Err: fmt.Sprintf("%v", err),
 		}
 		dat, errMarshal := json.Marshal(respBody)
@@ -69,7 +157,7 @@ func (cfg *apiConfig) chirps(w http.ResponseWriter, r *http.Request) {
 	cleanedBody := cleanProfaneBody(postData.Body)
 	log.Printf("After cleaned: %v\n", cleanedBody)
 	if len(postData.Body) > 140 {
-		respBody := returnErrVal{
+		respBody := returnErrChirp{
 			Err: "Chirp is too long",
 		}
 		dat, errMarshal := json.Marshal(respBody)
@@ -183,9 +271,6 @@ func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	type UserDetail struct {
-		Email string `json:"email"`
-	}
 	var postData UserDetail
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&postData)
@@ -201,13 +286,8 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, 500)
 		return
 	}
-	type returnVals struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
-	}
-	responseJson := returnVals{
+
+	responseJson := returnUser{
 		ID:        user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
@@ -242,6 +322,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(curdir)))))
 	mux.Handle("POST /api/chirps", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.chirps)))
+	mux.Handle("GET /api/chirps", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.chirps)))
+	mux.Handle("GET /api/chirps/{chirpID}", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.chirps)))
 	mux.Handle("GET /api/healthz", apiCfg.middlewareMetricsInc(http.HandlerFunc(readiness)))
 	mux.Handle("POST /api/users", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.createUser)))
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiCfg.numberOfHits))
