@@ -139,7 +139,7 @@ func (cfg *apiConfig) numberOfHits(w http.ResponseWriter, _ *http.Request) {
 
 func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	if dev := os.Getenv("PLATFORM"); dev == "dev" {
+	if dev := os.Getenv("PLATFORM"); dev != "dev" {
 		w.WriteHeader(403)
 		w.Write([]byte("Forbidden"))
 		return
