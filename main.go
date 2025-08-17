@@ -144,7 +144,6 @@ func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Forbidden"))
 		return
 	}
-	w.WriteHeader(200)
 	// n, err := w.Write([]byte("OK"))
 	// if err != nil {
 	// 	log.Fatalln("Unable to write to response writer!")
