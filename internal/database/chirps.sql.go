@@ -13,28 +13,36 @@ import (
 )
 
 const createChirp = `-- name: CreateChirp :one
-INSERT INTO chirps(created_at, updated_at, user_id)
+INSERT INTO chirps(body, created_at, updated_at, user_id)
 VALUES (
 	$1,
 	$2,
-	$3
+	$3,
+	$4
 )
-RETURNING id, created_at, updated_at, user_id
+RETURNING id, created_at, updated_at, body, user_id
 `
 
 type CreateChirpParams struct {
+	Body      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	UserID    uuid.UUID
 }
 
 func (q *Queries) CreateChirp(ctx context.Context, arg CreateChirpParams) (Chirp, error) {
-	row := q.db.QueryRowContext(ctx, createChirp, arg.CreatedAt, arg.UpdatedAt, arg.UserID)
+	row := q.db.QueryRowContext(ctx, createChirp,
+		arg.Body,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.UserID,
+	)
 	var i Chirp
 	err := row.Scan(
 		&i.ID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Body,
 		&i.UserID,
 	)
 	return i, err
