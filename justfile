@@ -5,18 +5,21 @@ run:
 
 up-migrate:
 	#!/bin/bash
+	source .env
 	cd sql/schema/
-	goose postgres "postgres://postgres:@localhost:5432/chirpy" up
+	goose postgres "$DB_URL" up
 
 drop-migrate:
 	#!/bin/bash
+	source .env
 	cd sql/schema/
-	goose postgres "postgres://postgres:@localhost:5432/chirpy" down
+	goose postgres "$DB_URL" down
 
 drop-migrate-all:
 	#!/bin/bash
+	source .env
 	cd sql/schema/
-	goose postgres "postgres://postgres:@localhost:5432/chirpy" down-to 0
+	goose postgres "$DB_URL" down-to 0
 
 sqlc-generate:
 	sqlc generate
