@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/uncomfyhalomacro/chirpy/internal/auth"
 	"github.com/uncomfyhalomacro/chirpy/internal/database"
 	"log"
 	"net/http"
@@ -25,9 +26,11 @@ type postDataShape struct {
 	UserID uuid.UUID `json:"user_id"`
 	Body   string    `json:"body"`
 }
+
 type returnErrChirp struct {
 	Err string `json:"error"`
 }
+
 type returnValidChirp struct {
 	ID        uuid.UUID `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -35,9 +38,12 @@ type returnValidChirp struct {
 	Body      string    `json:"body"`
 	UserID    uuid.UUID `json:"user_id"`
 }
+
 type UserDetail struct {
-	Email string `json:"email"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
+
 type returnUser struct {
 	ID        uuid.UUID `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -274,11 +280,26 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	var postData UserDetail
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&postData)
-	params := database.CreateUserParams{
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Email:     postData.Email,
+	if err != nil {
+		w.WriteHeader(500)
+		w.Write([]byte(fmt.Sprintf("JSON decode error: %v", err)))
+		return
 	}
+	hashedPassword, err := auth.HashPassword(postData.Password)
+	if err != nil {
+		log.Printf("%v\n", err)
+		w.WriteHeader(500)
+		w.Write([]byte("Server Error"))
+		return
+
+	}
+	params := database.CreateUserParams{
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		Email:          postData.Email,
+		HashedPassword: hashedPassword,
+	}
+
 	user, err := cfg.db.CreateUser(r.Context(), params)
 	if err != nil {
 		msg := fmt.Sprintf("500 - %s", err)
@@ -293,6 +314,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
 	}
+
 	dat, err := json.Marshal(responseJson)
 	if err != nil {
 		msg := fmt.Sprintf("500 - %s", err)
@@ -302,6 +324,47 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(201)
 	w.Write(dat)
+}
+
+func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
+	var postData UserDetail
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&postData)
+	if err != nil {
+		w.WriteHeader(500)
+		w.Write([]byte(fmt.Sprintf("JSON decode error: %v", err)))
+		return
+	}
+	user, err := cfg.db.GetUser(r.Context(), postData.Email)
+	if err != nil {
+		log.Printf("%v\n", err)
+		http.Error(w, "Unauthorized", 401)
+		return
+	}
+	err = auth.CheckPasswordHash(postData.Password, user.HashedPassword)
+	if err != nil {
+		log.Printf("%v\n", err)
+		http.Error(w, "Unauthorized", 401)
+		return
+	}
+
+	responseJson := returnUser{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
+
+	dat, err := json.Marshal(responseJson)
+	if err != nil {
+		msg := fmt.Sprintf("500 - %s", err)
+		log.Println(msg)
+		http.Error(w, msg, 500)
+		return
+	}
+	w.WriteHeader(200)
+	w.Write(dat)
+
 }
 
 func main() {
@@ -326,6 +389,7 @@ func main() {
 	mux.Handle("GET /api/chirps/{chirpID}", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.chirps)))
 	mux.Handle("GET /api/healthz", apiCfg.middlewareMetricsInc(http.HandlerFunc(readiness)))
 	mux.Handle("POST /api/users", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.createUser)))
+	mux.Handle("POST /api/login", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.loginUser)))
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiCfg.numberOfHits))
 	mux.Handle("POST /admin/reset", http.HandlerFunc(apiCfg.reset))
 	server := http.Server{}
