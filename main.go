@@ -20,6 +20,7 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
+	tokenSecret    string
 }
 
 type postDataShape struct {
@@ -39,9 +40,10 @@ type returnValidChirp struct {
 	UserID    uuid.UUID `json:"user_id"`
 }
 
-type UserDetail struct {
+type UserLoginDetail struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	Expiry   int64  `json:"expires_in_seconds"`
 }
 
 type returnUser struct {
@@ -49,6 +51,7 @@ type returnUser struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+	Token     string    `json:"token"`
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -140,6 +143,21 @@ func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) postChirps(w http.ResponseWriter, r *http.Request) {
+	var userID uuid.UUID
+	if token, err := auth.GetBearerToken(r.Header); err == nil {
+		if id, err := auth.ValidateJWT(token, cfg.tokenSecret); err == nil {
+			userID = id
+		} else {
+			w.WriteHeader(401)
+			w.Write([]byte("Unauthorized"))
+			return
+
+		}
+	} else {
+		w.WriteHeader(401)
+		w.Write([]byte("Unauthorized"))
+		return
+	}
 	var postData postDataShape
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&postData)
@@ -182,7 +200,7 @@ func (cfg *apiConfig) postChirps(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		Body:      cleanedBody,
-		UserID:    postData.UserID,
+		UserID:    userID,
 	}
 	chirp, err := cfg.db.CreateChirp(r.Context(), params)
 	if err != nil {
@@ -277,7 +295,7 @@ func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	var postData UserDetail
+	var postData UserLoginDetail
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&postData)
 	if err != nil {
@@ -327,13 +345,19 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
-	var postData UserDetail
+	var postData UserLoginDetail
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&postData)
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte(fmt.Sprintf("JSON decode error: %v", err)))
 		return
+	}
+	var expiresInSeconds time.Duration
+	if postData.Expiry == 0 {
+		expiresInSeconds = time.Duration(60*60) * time.Second
+	} else {
+		expiresInSeconds = time.Duration(postData.Expiry) * time.Second
 	}
 	user, err := cfg.db.GetUser(r.Context(), postData.Email)
 	if err != nil {
@@ -348,11 +372,20 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	newJWTToken, err := auth.MakeJWT(user.ID, cfg.tokenSecret, expiresInSeconds)
+
+	if err != nil {
+		log.Printf("%v\n", err)
+		http.Error(w, "Server Error", 500)
+		return
+	}
+
 	responseJson := returnUser{
 		ID:        user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
+		Token:     newJWTToken,
 	}
 
 	dat, err := json.Marshal(responseJson)
@@ -370,13 +403,15 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
+	tokenSecret := os.Getenv("SIGNING_KEY")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatalf("failed to connect to %s: %v\n", dbURL, err)
 	}
 	dbQueries := database.New(db)
 	apiCfg := apiConfig{
-		db: dbQueries,
+		db:          dbQueries,
+		tokenSecret: tokenSecret,
 	}
 	curdir, err := os.Getwd()
 	if err != nil {
