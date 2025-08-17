@@ -4,16 +4,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	_ "github.com/lib/pq"
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 	"github.com/uncomfyhalomacro/chirpy/internal/database"
 	"log"
 	"net/http"
 	"os"
 	"strings"
-	"time"
-	"github.com/joho/godotenv"
 	"sync/atomic"
+	"time"
 )
 
 type apiConfig struct {
@@ -86,10 +86,10 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 	}
 	dat, errMarshal := json.Marshal(respBody)
 	if errMarshal != nil {
-			msg := fmt.Sprintf("500 - %s", errMarshal)
-			log.Printf("%s\n", msg)
-			http.Error(w, msg, 500)
-			return
+		msg := fmt.Sprintf("500 - %s", errMarshal)
+		log.Printf("%s\n", msg)
+		http.Error(w, msg, 500)
+		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
@@ -170,12 +170,12 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	var postData UserDetail
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&postData)
-	params := database.CreateUserParams {
+	params := database.CreateUserParams{
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
-		Email: postData.Email,
+		Email:     postData.Email,
 	}
-	user, err := cfg.db.CreateUser(r.Context(),  params)
+	user, err := cfg.db.CreateUser(r.Context(), params)
 	if err != nil {
 		msg := fmt.Sprintf("500 - %s", err)
 		log.Printf("failed to create user! %s\n", msg)
@@ -183,16 +183,16 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type returnVals struct {
-		ID uuid.UUID `json:"id"`
+		ID        uuid.UUID `json:"id"`
 		CreatedAt time.Time `json:"created_at"`
 		UpdatedAt time.Time `json:"updated_at"`
-		Email string `json:"email"`
+		Email     string    `json:"email"`
 	}
-	responseJson := returnVals {
-		ID: user.ID,
+	responseJson := returnVals{
+		ID:        user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
-		Email: user.Email,
+		Email:     user.Email,
 	}
 	dat, err := json.Marshal(responseJson)
 	if err != nil {
