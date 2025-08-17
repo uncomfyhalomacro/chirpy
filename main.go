@@ -31,16 +31,20 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	})
 }
 
-func validateChirp(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) chirps(w http.ResponseWriter, r *http.Request) {
 	type postDataShape struct {
-		Body string `json:"body"`
+		UserID uuid.UUID `json:"user_id"`
+		Body   string    `json:"body"`
 	}
 	type returnErrVal struct {
 		Err string `json:"error"`
 	}
-	type returnValid struct {
-		Valid       bool   `json:"valid"`
-		CleanedBody string `json:"cleaned_body"`
+	type returnValidChirp struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserID    uuid.UUID `json:"user_id"`
 	}
 	var postData postDataShape
 	decoder := json.NewDecoder(r.Body)
@@ -80,9 +84,25 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		w.Write(dat)
 		return
 	}
-	respBody := returnValid{
-		Valid:       true,
-		CleanedBody: cleanedBody,
+	params := database.CreateChirpParams{
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Body:      cleanedBody,
+		UserID:    postData.UserID,
+	}
+	chirp, err := cfg.db.CreateChirp(r.Context(), params)
+	if err != nil {
+		msg := fmt.Sprintf("500 - %s", err)
+		log.Printf("failed to create chirp! %s\n", msg)
+		http.Error(w, msg, 500)
+		return
+	}
+	respBody := returnValidChirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
 	}
 	dat, errMarshal := json.Marshal(respBody)
 	if errMarshal != nil {
@@ -92,7 +112,7 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
+	w.WriteHeader(201)
 	w.Write(dat)
 }
 
@@ -221,7 +241,7 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(curdir)))))
-	mux.Handle("POST /api/validate_chirp", apiCfg.middlewareMetricsInc(http.HandlerFunc(validateChirp)))
+	mux.Handle("POST /api/chirps", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.chirps)))
 	mux.Handle("GET /api/healthz", apiCfg.middlewareMetricsInc(http.HandlerFunc(readiness)))
 	mux.Handle("POST /api/users", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.createUser)))
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiCfg.numberOfHits))
