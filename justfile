@@ -1,5 +1,8 @@
 #!/usr/bin/just
 
+run:
+	go build && ./chirpy
+
 up-migrate:
 	#!/bin/bash
 	cd sql/schema/
