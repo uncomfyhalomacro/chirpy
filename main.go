@@ -5,17 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	_ "github.com/lib/pq"
+	"github.com/google/uuid"
 	"github.com/uncomfyhalomacro/chirpy/internal/database"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
+	"github.com/joho/godotenv"
 	"sync/atomic"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
-	dbQueries      *database.Queries
+	db             *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -48,8 +51,9 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		}
 		dat, errMarshal := json.Marshal(respBody)
 		if errMarshal != nil {
-			log.Printf("Error marshalling JSON: %s", err)
-			w.WriteHeader(500)
+			msg := fmt.Sprintf("500 - %s", errMarshal)
+			log.Printf("%s\n", msg)
+			http.Error(w, msg, 500)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -66,8 +70,9 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		}
 		dat, errMarshal := json.Marshal(respBody)
 		if errMarshal != nil {
-			log.Printf("Error marshalling JSON: %s", err)
-			w.WriteHeader(500)
+			msg := fmt.Sprintf("500 - %s", errMarshal)
+			log.Printf("%s\n", msg)
+			http.Error(w, msg, 500)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -81,9 +86,10 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 	}
 	dat, errMarshal := json.Marshal(respBody)
 	if errMarshal != nil {
-		log.Printf("Error marshalling JSON: %s", err)
-		w.WriteHeader(500)
-		return
+			msg := fmt.Sprintf("500 - %s", errMarshal)
+			log.Printf("%s\n", msg)
+			http.Error(w, msg, 500)
+			return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
@@ -131,19 +137,77 @@ func (cfg *apiConfig) numberOfHits(w http.ResponseWriter, _ *http.Request) {
 	log.Printf("Total hits: %d\n", cfg.fileserverHits.Load())
 }
 
-func (cfg *apiConfig) reset(w http.ResponseWriter, _ *http.Request) {
+func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(200)
-	n, err := w.Write([]byte("OK"))
-	if err != nil {
-		log.Fatalln("Unable to write to response writer!")
+	if dev := os.Getenv("PLATFORM"); dev == "dev" {
+		w.WriteHeader(403)
+		w.Write([]byte("Forbidden"))
+		return
 	}
-	log.Printf("Have written a total of %d bytes\n", n)
-	cfg.fileserverHits.Swap(0)
-	log.Println("Reset number of hits to 0")
+	w.WriteHeader(200)
+	// n, err := w.Write([]byte("OK"))
+	// if err != nil {
+	// 	log.Fatalln("Unable to write to response writer!")
+	// }
+	// log.Printf("Have written a total of %d bytes\n", n)
+	// cfg.fileserverHits.Swap(0)
+	// log.Println("Reset number of hits to 0")
+	err := cfg.db.ResetUsers(r.Context())
+	if err != nil {
+		w.WriteHeader(500)
+		w.Write([]byte(fmt.Sprintf("Database query error: %v", err)))
+		return
+	}
+	w.WriteHeader(200)
+	w.Write([]byte("OK"))
+}
+
+func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	type UserDetail struct {
+		Email string `json:"email"`
+	}
+	var postData UserDetail
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&postData)
+	params := database.CreateUserParams {
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Email: postData.Email,
+	}
+	user, err := cfg.db.CreateUser(r.Context(),  params)
+	if err != nil {
+		msg := fmt.Sprintf("500 - %s", err)
+		log.Printf("failed to create user! %s\n", msg)
+		http.Error(w, msg, 500)
+		return
+	}
+	type returnVals struct {
+		ID uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email string `json:"email"`
+	}
+	responseJson := returnVals {
+		ID: user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email: user.Email,
+	}
+	dat, err := json.Marshal(responseJson)
+	if err != nil {
+		msg := fmt.Sprintf("500 - %s", err)
+		log.Println(msg)
+		http.Error(w, msg, 500)
+		w.WriteHeader(500)
+		return
+	}
+	w.WriteHeader(201)
+	w.Write(dat)
 }
 
 func main() {
+	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -151,7 +215,7 @@ func main() {
 	}
 	dbQueries := database.New(db)
 	apiCfg := apiConfig{
-		dbQueries: dbQueries,
+		db: dbQueries,
 	}
 	curdir, err := os.Getwd()
 	if err != nil {
@@ -161,6 +225,7 @@ func main() {
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(curdir)))))
 	mux.Handle("POST /api/validate_chirp", apiCfg.middlewareMetricsInc(http.HandlerFunc(validateChirp)))
 	mux.Handle("GET /api/healthz", apiCfg.middlewareMetricsInc(http.HandlerFunc(readiness)))
+	mux.Handle("POST /api/users", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.createUser)))
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiCfg.numberOfHits))
 	mux.Handle("POST /admin/reset", http.HandlerFunc(apiCfg.reset))
 	server := http.Server{}
