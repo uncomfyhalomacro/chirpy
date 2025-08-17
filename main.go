@@ -1,17 +1,21 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	_ "github.com/lib/pq"
+	"github.com/uncomfyhalomacro/chirpy/internal/database"
 	"log"
 	"net/http"
 	"os"
-	"sync/atomic"
 	"strings"
+	"sync/atomic"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	dbQueries      *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -32,7 +36,7 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		Err string `json:"error"`
 	}
 	type returnValid struct {
-		Valid bool `json:"valid"`
+		Valid       bool   `json:"valid"`
 		CleanedBody string `json:"cleaned_body"`
 	}
 	var postData postDataShape
@@ -72,7 +76,7 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respBody := returnValid{
-		Valid: true,
+		Valid:       true,
 		CleanedBody: cleanedBody,
 	}
 	dat, errMarshal := json.Marshal(respBody)
@@ -88,10 +92,10 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 
 func cleanProfaneBody(s string) string {
 	fields := strings.Split(s, " ")
-	badwords := map[string]bool {
+	badwords := map[string]bool{
 		"kerfuffle": true,
-		"sharbert": true,
-		"fornax": true,
+		"sharbert":  true,
+		"fornax":    true,
 	}
 	for idx, element := range fields {
 		if badwords[strings.ToLower(element)] {
@@ -140,7 +144,15 @@ func (cfg *apiConfig) reset(w http.ResponseWriter, _ *http.Request) {
 }
 
 func main() {
-	apiCfg := apiConfig{}
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("failed to connect to %s: %v\n", dbURL, err)
+	}
+	dbQueries := database.New(db)
+	apiCfg := apiConfig{
+		dbQueries: dbQueries,
+	}
 	curdir, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("failed to get current directory: %v\n", err)
@@ -154,10 +166,10 @@ func main() {
 	server := http.Server{}
 	server.Addr = ":8080"
 	server.Handler = mux
-	if err := server.ListenAndServe(); err != nil {
+	if err = server.ListenAndServe(); err != nil {
 		log.Fatalf("listen and serve failed: %v\n", err)
 	}
-	if err := server.Close(); err != nil {
+	if err = server.Close(); err != nil {
 		log.Fatalf("closing the server failed: %v\n", err)
 	}
 
