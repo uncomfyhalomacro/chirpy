@@ -8,8 +8,6 @@ package database
 import (
 	"context"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 const createUser = `-- name: CreateUser :one
@@ -49,25 +47,19 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const getUser = `-- name: GetUser :one
-SELECT created_at, updated_at, email, id FROM users
+SELECT id, created_at, updated_at, email, hashed_password FROM users
 WHERE email=$1 LIMIT 1
 `
 
-type GetUserRow struct {
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Email     string
-	ID        uuid.UUID
-}
-
-func (q *Queries) GetUser(ctx context.Context, email string) (GetUserRow, error) {
+func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
 	row := q.db.QueryRowContext(ctx, getUser, email)
-	var i GetUserRow
+	var i User
 	err := row.Scan(
+		&i.ID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Email,
-		&i.ID,
+		&i.HashedPassword,
 	)
 	return i, err
 }

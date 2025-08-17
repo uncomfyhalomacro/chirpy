@@ -12,5 +12,5 @@ RETURNING *;
 DELETE FROM users;
 
 -- name: GetUser :one
-SELECT created_at, updated_at, email, id FROM users
+SELECT * FROM users
 WHERE email=$1 LIMIT 1;
