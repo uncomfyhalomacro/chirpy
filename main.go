@@ -198,7 +198,6 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		msg := fmt.Sprintf("500 - %s", err)
 		log.Println(msg)
 		http.Error(w, msg, 500)
-		w.WriteHeader(500)
 		return
 	}
 	w.WriteHeader(201)
