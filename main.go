@@ -53,6 +53,7 @@ type returnUser struct {
 	Email        string    `json:"email"`
 	Token        string    `json:"token"`
 	RefreshToken string    `json:"refresh_token"`
+	IsChirpyRed  bool      `json:"is_chirpy_red"`
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -73,6 +74,56 @@ func (cfg *apiConfig) chirps(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		cfg.getChirps(w, r)
 		return
+	}
+	if r.Method == "DELETE" {
+		cfg.deleteChirps(w, r)
+		return
+	}
+}
+
+func (cfg *apiConfig) deleteChirps(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Println("no bearer")
+		w.WriteHeader(401)
+		w.Write([]byte("Unauthorized"))
+		return
+	}
+	userID, err := auth.ValidateJWT(token, cfg.tokenSecret)
+	if err != nil {
+		log.Printf("jwt error: %v", err)
+		w.WriteHeader(401)
+		w.Write([]byte("Unauthorized"))
+		return
+	}
+	pathValue := r.PathValue("chirpID")
+	if pathValue != "" {
+		id, err := uuid.Parse(pathValue)
+		if err != nil {
+			msg := fmt.Sprintf("500 - %s", err)
+			log.Printf("%s\n", msg)
+			http.Error(w, msg, 500)
+			return
+		}
+		chirp, err := cfg.db.GetChirp(r.Context(), id)
+		if err != nil {
+			msg := fmt.Sprintf("404 - %s", err)
+			log.Printf("%s\n", msg)
+			http.Error(w, msg, 404)
+			return
+		}
+		if chirp.UserID != userID {
+			http.Error(w, http.StatusText(403), 403)
+			return
+		}
+		err = cfg.db.DeleteChirp(r.Context(), chirp.ID)
+		if err != nil {
+			http.Error(w, http.StatusText(500), 500)
+			return
+		}
+		w.WriteHeader(204)
+		return
+
 	}
 }
 
@@ -327,10 +378,11 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	responseJson := returnUser{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
+		ID:          user.ID,
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	}
 
 	dat, err := json.Marshal(responseJson)
@@ -395,6 +447,7 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 		Email:        user.Email,
 		Token:        newJWTToken,
 		RefreshToken: refreshToken,
+		IsChirpyRed:  user.IsChirpyRed,
 	}
 
 	dat, err := json.Marshal(responseJson)
@@ -420,6 +473,70 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.WriteHeader(200)
+	w.Write(dat)
+}
+
+func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Println("no bearer")
+		w.WriteHeader(401)
+		w.Write([]byte("Unauthorized"))
+		return
+	}
+	userID, err := auth.ValidateJWT(token, cfg.tokenSecret)
+	if err != nil {
+		log.Printf("jwt error: %v", err)
+		w.WriteHeader(401)
+		w.Write([]byte("Unauthorized"))
+		return
+	}
+	type updateVal struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	var postData updateVal
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(&postData)
+	if err != nil {
+		w.WriteHeader(500)
+		w.Write([]byte(fmt.Sprintf("JSON decode error: %v", err)))
+		return
+	}
+	hashedPassword, err := auth.HashPassword(postData.Password)
+	if err != nil {
+		w.WriteHeader(500)
+		return
+	}
+	params := database.UpdateUserDetailsParams{
+		Email:          postData.Email,
+		HashedPassword: hashedPassword,
+		ID:             userID,
+	}
+	updatedUser, err := cfg.db.UpdateUserDetails(r.Context(), params)
+
+	if err != nil {
+		msg := fmt.Sprintf("500 - %s", err)
+		log.Printf("failed to update user! %s\n", msg)
+		http.Error(w, msg, 500)
+		return
+	}
+
+	responseJson := returnUser{
+		ID:        updatedUser.ID,
+		CreatedAt: updatedUser.CreatedAt,
+		UpdatedAt: updatedUser.UpdatedAt,
+		Email:     updatedUser.Email,
+	}
+
+	dat, err := json.Marshal(responseJson)
+	if err != nil {
+		msg := fmt.Sprintf("500 - %s", err)
+		log.Println(msg)
+		http.Error(w, msg, 500)
+		return
+	}
 	w.WriteHeader(200)
 	w.Write(dat)
 }
@@ -514,6 +631,41 @@ func (cfg *apiConfig) revokeToken(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func (cfg *apiConfig) webhooks(w http.ResponseWriter, r *http.Request) {
+	type hook struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+	var postData hook
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&postData)
+	if err != nil {
+		w.WriteHeader(500)
+		w.Write([]byte(fmt.Sprintf("JSON decode error: %v", err)))
+		return
+	}
+	if postData.Event != "user.upgraded" {
+		w.WriteHeader(204)
+		return
+	}
+	userID, err := uuid.Parse(postData.Data.UserID)
+	if err != nil {
+		w.WriteHeader(500)
+		return
+	}
+	user, err := cfg.db.UpgradeUserToChirpyRed(r.Context(), userID)
+	if err == nil {
+		if user.IsChirpyRed {
+			log.Printf("User with email %s was upgraded to chirpy red", user.Email)
+			w.WriteHeader(204)
+			return
+		}
+	}
+	w.WriteHeader(404)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -536,11 +688,14 @@ func main() {
 	mux.Handle("POST /api/chirps", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.chirps)))
 	mux.Handle("GET /api/chirps", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.chirps)))
 	mux.Handle("GET /api/chirps/{chirpID}", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.chirps)))
+	mux.Handle("DELETE /api/chirps/{chirpID}", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.chirps)))
 	mux.Handle("GET /api/healthz", apiCfg.middlewareMetricsInc(http.HandlerFunc(readiness)))
 	mux.Handle("POST /api/users", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.createUser)))
+	mux.Handle("PUT /api/users", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.updateUser)))
 	mux.Handle("POST /api/login", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.loginUser)))
 	mux.Handle("POST /api/revoke", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.revokeToken)))
 	mux.Handle("POST /api/refresh", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.refreshTheToken)))
+	mux.Handle("POST /api/polka/webhooks", apiCfg.middlewareMetricsInc(http.HandlerFunc(apiCfg.webhooks)))
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiCfg.numberOfHits))
 	mux.Handle("POST /admin/reset", http.HandlerFunc(apiCfg.reset))
 	server := http.Server{}
