@@ -1,11 +1,10 @@
 package auth
 
-
 import (
+	"fmt"
 	"net/http"
 	"strings"
-	"fmt"
-	)
+)
 
 func GetApiKey(headers http.Header) (string, error) {
 	authHeader := headers.Get("Authorization")
