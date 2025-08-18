@@ -81,7 +81,7 @@ func (q *Queries) GetExpiry(ctx context.Context, arg GetExpiryParams) (GetExpiry
 }
 
 const getUserFromRefreshToken = `-- name: GetUserFromRefreshToken :one
-SELECT users.id, users.created_at, users.updated_at, users.email, users.hashed_password FROM users
+SELECT users.id, users.created_at, users.updated_at, users.email, users.hashed_password, users.is_chirpy_red FROM users
 WHERE id=(
 	SELECT refresh_tokens.user_id FROM refresh_tokens
 	WHERE token=$1 LIMIT 1
@@ -97,6 +97,7 @@ func (q *Queries) GetUserFromRefreshToken(ctx context.Context, token string) (Us
 		&i.UpdatedAt,
 		&i.Email,
 		&i.HashedPassword,
+		&i.IsChirpyRed,
 	)
 	return i, err
 }
