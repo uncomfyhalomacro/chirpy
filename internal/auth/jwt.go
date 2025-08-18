@@ -2,12 +2,11 @@ package auth
 
 import (
 	"fmt"
-	"strings"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"time"
-	"errors"
 	"net/http"
+	"strings"
+	"time"
 )
 
 func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
@@ -31,9 +30,11 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	var id uuid.UUID
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 		return []byte(tokenSecret), nil
-	})
-	switch {
-	case token.Valid:
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+	if err != nil {
+		return id, err
+	}
+	if token.Valid {
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
 			subject, err := claims.GetSubject()
 			if err != nil {
@@ -47,18 +48,8 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		} else {
 			return id, fmt.Errorf("unknown claims type, cannot proceed")
 		}
-	case errors.Is(err, jwt.ErrTokenMalformed):
-		return id, fmt.Errorf("token is malformed")
-	case errors.Is(err, jwt.ErrTokenSignatureInvalid):
-		// Invalid signature
-		return id, fmt.Errorf("invalid signature")
-	case errors.Is(err, jwt.ErrTokenExpired) || errors.Is(err, jwt.ErrTokenNotValidYet):
-		// Token is either expired or not active yet
-		return id, fmt.Errorf("token has expired or still inactive")
-	default:
-		return id, fmt.Errorf("unknown error: %v", err)
 	}
-
+	return id, err
 }
 
 func GetBearerToken(headers http.Header) (string, error) {
