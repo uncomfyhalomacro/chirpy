@@ -61,5 +61,8 @@ func GetBearerToken(headers http.Header) (string, error) {
 	if len(fields) > 2 || len(fields) <= 1 {
 		return "", fmt.Errorf("this is not a valid authorization header")
 	}
+	if fields[0] != "Bearer" {
+		return "", fmt.Errorf("invalid authorization for bearer token")
+	}
 	return fields[1], nil
 }
