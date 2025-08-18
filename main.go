@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"sort"
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
@@ -21,6 +22,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
 	tokenSecret    string
+	polkaSecret    string
 }
 
 type postDataShape struct {
@@ -128,8 +130,52 @@ func (cfg *apiConfig) deleteChirps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
+	sortKind := r.URL.Query().Get("sort")
+	author_id := r.URL.Query().Get("author_id")
 	pathValue := r.PathValue("chirpID")
-	if pathValue != "" {
+	if author_id != "" && pathValue != "" {
+		http.Error(w, http.StatusText(409), 409)
+		return
+	}
+	if author_id != "" && pathValue == "" {
+		id, err := uuid.Parse(author_id)
+		if err != nil {
+			msg := fmt.Sprintf("500 - %s", err)
+			log.Printf("%s\n", msg)
+			http.Error(w, msg, 500)
+			return
+		}
+		chirps, err := cfg.db.GetChirpsByUserID(r.Context(), id)
+		var returnValidChirps []returnValidChirp
+		if err != nil {
+			msg := fmt.Sprintf("404 - %s", err)
+			log.Printf("%s\n", msg)
+			http.Error(w, msg, 404)
+			return
+		}
+		for _, chirp := range chirps {
+			respBody := returnValidChirp{
+				ID:        chirp.ID,
+				CreatedAt: chirp.CreatedAt,
+				UpdatedAt: chirp.UpdatedAt,
+				Body:      chirp.Body,
+				UserID:    chirp.UserID,
+			}
+			returnValidChirps = append(returnValidChirps, respBody)
+		}
+		dat, errMarshal := json.Marshal(returnValidChirps)
+		if errMarshal != nil {
+			msg := fmt.Sprintf("500 - %s", errMarshal)
+			log.Printf("%s\n", msg)
+			http.Error(w, msg, 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write(dat)
+		return
+	}
+	if pathValue != "" && author_id == "" {
 		id, err := uuid.Parse(pathValue)
 		if err != nil {
 			msg := fmt.Sprintf("500 - %s", err)
@@ -180,6 +226,16 @@ func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
 			Body:      chirp.Body,
 			UserID:    chirp.UserID,
 		})
+	}
+
+	if sortKind == "desc" {
+		sort.Slice(chirpJSON, func (i, j int) bool { return chirpJSON[i].CreatedAt.After(chirpJSON[j].CreatedAt) })
+	} else if sortKind == "asc" {
+		log.Println("stick to old sort")
+	} else {
+		w.WriteHeader(403)
+		w.Write([]byte("sort value should be `desc` or `asc`"))
+		return
 	}
 
 	dat, errMarshal := json.Marshal(chirpJSON)
@@ -632,6 +688,17 @@ func (cfg *apiConfig) revokeToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) webhooks(w http.ResponseWriter, r *http.Request) {
+	polkaSecret, err := auth.GetApiKey(r.Header)
+	if err != nil {
+		w.WriteHeader(401)
+		return
+	}
+	if polkaSecret != cfg.polkaSecret {
+		w.WriteHeader(401)
+		w.Write([]byte("unauthorized"))
+		return
+
+	}
 	type hook struct {
 		Event string `json:"event"`
 		Data  struct {
@@ -640,7 +707,7 @@ func (cfg *apiConfig) webhooks(w http.ResponseWriter, r *http.Request) {
 	}
 	var postData hook
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&postData)
+	err = decoder.Decode(&postData)
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte(fmt.Sprintf("JSON decode error: %v", err)))
@@ -670,6 +737,7 @@ func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	tokenSecret := os.Getenv("SIGNING_KEY")
+	polkaSecret := os.Getenv("POLKA_KEY")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatalf("failed to connect to %s: %v\n", dbURL, err)
@@ -678,6 +746,7 @@ func main() {
 	apiCfg := apiConfig{
 		db:          dbQueries,
 		tokenSecret: tokenSecret,
+		polkaSecret: polkaSecret,
 	}
 	curdir, err := os.Getwd()
 	if err != nil {
