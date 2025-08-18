@@ -1,10 +1,10 @@
 package auth
 
 import (
-	"testing"
 	"github.com/google/uuid"
-	"time"
 	"net/http"
+	"testing"
+	"time"
 )
 
 func TestJWT(t *testing.T) {
