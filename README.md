@@ -109,6 +109,16 @@ just up-migrate
 
 This should prepare all the tables needed for this project to work.
 
+### Install and Run SQLC
+
+You need `sqlc` to generate Go code. See <https://docs.sqlc.dev/en/latest/overview/install.html>.
+
+Then run
+
+```
+just sqlc-generate
+```
+
 ### Run it
 
 ```
