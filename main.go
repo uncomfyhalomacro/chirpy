@@ -161,7 +161,6 @@ func (cfg *apiConfig) postChirps(w http.ResponseWriter, r *http.Request) {
 	var postData postDataShape
 	decoder := json.NewDecoder(r.Body)
 	err = decoder.Decode(&postData)
-	log.Println("WHAT HAPPENED?")
 	if err != nil {
 		respBody := returnErrChirp{
 			Err: fmt.Sprintf("%v", err),
