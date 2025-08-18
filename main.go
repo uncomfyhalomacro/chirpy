@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"sort"
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
@@ -13,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -163,6 +163,15 @@ func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
 			}
 			returnValidChirps = append(returnValidChirps, respBody)
 		}
+		if sortKind == "desc" {
+			sort.Slice(returnValidChirps, func(i, j int) bool { return returnValidChirps[i].CreatedAt.After(returnValidChirps[j].CreatedAt) })
+		} else if sortKind == "asc" {
+			log.Println("stick to old sort")
+		} else {
+			w.WriteHeader(403)
+			w.Write([]byte("sort value should be `desc` or `asc`"))
+			return
+		}
 		dat, errMarshal := json.Marshal(returnValidChirps)
 		if errMarshal != nil {
 			msg := fmt.Sprintf("500 - %s", errMarshal)
@@ -229,7 +238,7 @@ func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if sortKind == "desc" {
-		sort.Slice(chirpJSON, func (i, j int) bool { return chirpJSON[i].CreatedAt.After(chirpJSON[j].CreatedAt) })
+		sort.Slice(chirpJSON, func(i, j int) bool { return chirpJSON[i].CreatedAt.After(chirpJSON[j].CreatedAt) })
 	} else if sortKind == "asc" {
 		log.Println("stick to old sort")
 	} else {
