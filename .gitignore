@@ -11,6 +11,7 @@
 !sql/*/**
 !sqlc.yaml
 !.github/*/**
+!.env.example
 
 !README.md
 !LICENSE
